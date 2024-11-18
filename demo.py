@@ -10,7 +10,7 @@ from ultralytics.utils import ASSETS, yaml_load
 from ultralytics.utils.checks import check_yaml
 from ultralytics.utils.plotting import Colors
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 frame_width, frame_height = int(cap.get(3)), int(cap.get(4))
 out = cv2.VideoWriter(
     "output.avi",
