@@ -227,7 +227,10 @@ def scan_cropped_masked_image(im, segments, boxes, back_threshold=0.9, side_thre
             cv2.imwrite(output_path, cropped_image)
             print(f'Saved cropped image: {output_path}')
 
-            ocr_list = extract_text_with_paddleocr(cropped_image)
+            try:
+                ocr_list = extract_text_with_paddleocr(cropped_image)
+            except TypeError as e:
+                return ""
             sorted_list = sorted(ocr_list, key=lambda s: sum(c.isdigit() for c in s) / len(s) if len(s) > 0 else 0)
             catnum = sorted_list[-1]
             if any(char.isdigit() for char in catnum):
