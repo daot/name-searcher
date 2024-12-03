@@ -14,7 +14,7 @@ from pyzbar.pyzbar import decode
 from PIL import Image
 
 # Initialize PaddleOCR
-ocr = PaddleOCR(use_angle_cls=True, lang='en') 
+ocr = PaddleOCR(use_angle_cls=True, lang="en")
 cap = cv2.VideoCapture(0)
 frame_width, frame_height = int(cap.get(3)), int(cap.get(4))
 out = cv2.VideoWriter(
@@ -31,6 +31,7 @@ classes = ["Front", "Back", "Side"]
 # Create color palette
 color_palette = Colors()
 
+
 def build_model(onnx_model):
     """Builds the ONNX model session."""
     session = ort.InferenceSession(
@@ -45,6 +46,7 @@ def build_model(onnx_model):
     model_height, model_width = [x.shape for x in session.get_inputs()][0][-2:]
     return session, ndtype, model_height, model_width
 
+
 def preprocess(img, model_height, model_width, ndtype):
     """Pre-processes the input image."""
     shape = img.shape[:2]  # original image shape
@@ -57,19 +59,27 @@ def preprocess(img, model_height, model_width, ndtype):
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(pad_h - 0.1)), int(round(pad_h + 0.1))
     left, right = int(round(pad_w - 0.1)), int(round(pad_w + 0.1))
-    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+    img = cv2.copyMakeBorder(
+        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
+    )
     img = np.ascontiguousarray(np.einsum("HWC->CHW", img)[::-1], dtype=ndtype) / 255.0
     img_process = img[None] if len(img.shape) == 3 else img
     return img_process, ratio, (pad_w, pad_h)
+
 
 def postprocess(preds, im0, ratio, pad_w, pad_h, conf_threshold, iou_threshold, nm=32):
     """Post-process the prediction."""
     x, protos = preds[0], preds[1]  # Two outputs: predictions and protos
     x = np.einsum("bcn->bnc", x)
     x = x[np.amax(x[..., 4:-nm], axis=-1) > conf_threshold]
-    x = np.c_[x[..., :4], np.amax(x[..., 4:-nm], axis=-1), np.argmax(x[..., 4:-nm], axis=-1), x[..., -nm:]]
+    x = np.c_[
+        x[..., :4],
+        np.amax(x[..., 4:-nm], axis=-1),
+        np.argmax(x[..., 4:-nm], axis=-1),
+        x[..., -nm:],
+    ]
     x = x[cv2.dnn.NMSBoxes(x[:, :4], x[:, 4], conf_threshold, iou_threshold)]
-    
+
     if len(x) > 0:
         x[..., [0, 1]] -= x[..., [2, 3]] / 2
         x[..., [2, 3]] += x[..., [0, 1]]
@@ -83,17 +93,21 @@ def postprocess(preds, im0, ratio, pad_w, pad_h, conf_threshold, iou_threshold, 
     else:
         return [], [], []
 
+
 def masks2segments(masks):
     """Takes a list of masks(n,h,w) and returns a list of segments(n,xy)."""
     segments = []
     for x in masks.astype("uint8"):
-        c = cv2.findContours(x, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]  # CHAIN_APPROX_SIMPLE
+        c = cv2.findContours(x, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[
+            0
+        ]  # CHAIN_APPROX_SIMPLE
         if c:
             c = np.array(c[np.array([len(x) for x in c]).argmax()]).reshape(-1, 2)
         else:
             c = np.zeros((0, 2))  # no segments found
         segments.append(c.astype("float32"))
     return segments
+
 
 def crop_mask(masks, boxes):
     """Crops a mask to the bounding box."""
@@ -102,6 +116,7 @@ def crop_mask(masks, boxes):
     r = np.arange(w, dtype=x1.dtype)[None, None, :]
     c = np.arange(h, dtype=x1.dtype)[None, :, None]
     return masks * ((r >= x1) * (r < x2) * (c >= y1) * (c < y2))
+
 
 def process_mask(protos, masks_in, bboxes, im0_shape):
     """Applies the mask to the bounding boxes."""
@@ -117,24 +132,36 @@ def process_mask(protos, masks_in, bboxes, im0_shape):
     masks = crop_mask(masks, bboxes)
     return np.greater(masks, 0.5)
 
+
 def scale_mask(masks, im0_shape, ratio_pad=None):
     """Resizes the mask to the original image size."""
     im1_shape = masks.shape[:2]
     if ratio_pad is None:  # calculate from im0_shape
-        gain = min(im1_shape[0] / im0_shape[0], im1_shape[1] / im0_shape[1])  # gain  = old / new
-        pad = (im1_shape[1] - im0_shape[1] * gain) / 2, (im1_shape[0] - im0_shape[0] * gain) / 2  # wh padding
+        gain = min(
+            im1_shape[0] / im0_shape[0], im1_shape[1] / im0_shape[1]
+        )  # gain  = old / new
+        pad = (im1_shape[1] - im0_shape[1] * gain) / 2, (
+            im1_shape[0] - im0_shape[0] * gain
+        ) / 2  # wh padding
     else:
         pad = ratio_pad[1]
 
     top, left = int(round(pad[1] - 0.1)), int(round(pad[0] - 0.1))  # y, x
-    bottom, right = int(round(im1_shape[0] - pad[1] + 0.1)), int(round(im1_shape[1] - pad[0] + 0.1))
+    bottom, right = int(round(im1_shape[0] - pad[1] + 0.1)), int(
+        round(im1_shape[1] - pad[0] + 0.1)
+    )
     if len(masks.shape) < 2:
-        raise ValueError(f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}')
+        raise ValueError(
+            f'"len of masks shape" should be 2 or 3, but got {len(masks.shape)}'
+        )
     masks = masks[top:bottom, left:right]
-    masks = cv2.resize(masks, (im0_shape[1], im0_shape[0]), interpolation=cv2.INTER_LINEAR)  # INTER_CUBIC would be better
+    masks = cv2.resize(
+        masks, (im0_shape[1], im0_shape[0]), interpolation=cv2.INTER_LINEAR
+    )  # INTER_CUBIC would be better
     if len(masks.shape) == 2:
         masks = masks[:, :, None]
     return masks
+
 
 def draw_and_visualize(im, boxes, segments, album_name):
     """Draw and visualize results."""
@@ -144,181 +171,193 @@ def draw_and_visualize(im, boxes, segments, album_name):
         if segment.size > 0:
             segment = segment.astype(np.int32)  # Ensure segment points are integers
             # Draw contour and fill mask
-            cv2.polylines(im, np.int32([segment]), True, (255, 255, 255), 2)  # white borderline
-            cv2.fillPoly(im_canvas, np.int32([segment]), color_palette(int(cls_), bgr=True))
+            cv2.polylines(
+                im, np.int32([segment]), True, (255, 255, 255), 2
+            )  # white borderline
+            cv2.fillPoly(
+                im_canvas, np.int32([segment]), color_palette(int(cls_), bgr=True)
+            )
 
             # Draw bbox rectangle
-            cv2.rectangle(im, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])),
-                          color_palette(int(cls_), bgr=True), 1, cv2.LINE_AA)
-            cv2.putText(im, f"{album_name}: {conf:.3f}", (int(box[0]), int(box[1] - 9)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_palette(int(cls_), bgr=True), 2, cv2.LINE_AA)
+            cv2.rectangle(
+                im,
+                (int(box[0]), int(box[1])),
+                (int(box[2]), int(box[3])),
+                color_palette(int(cls_), bgr=True),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                im,
+                f"{album_name}: {conf:.3f}",
+                (int(box[0]), int(box[1] - 9)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                color_palette(int(cls_), bgr=True),
+                2,
+                cv2.LINE_AA,
+            )
 
     # Mix image
     im = cv2.addWeighted(im_canvas, 0.3, im, 0.7, 0)
-    cv2.namedWindow("Name-Searcher", cv2.WINDOW_NORMAL) 
-    cv2.resizeWindow("Name-Searcher", scaled_size) 
+    cv2.namedWindow("Name-Searcher", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Name-Searcher", scaled_size)
     cv2.imshow("Name-Searcher", im)
+
 
 def get_full_album_name(jsonstr):
     """Reads MusicBrainz JSON for album details."""
     j = json.loads(jsonstr)
-    outstr = j["releases"][0]["title"] + " - " + j["releases"][0]["artist-credit"][0]["name"]
-    try: 
-        outstr += j["releases"][0]["artist-credit"][0]["joinphrase"] + " " + j["releases"][0]["artist-credit"][1]["name"]
+    outstr = (
+        j["releases"][0]["title"] + " - " + j["releases"][0]["artist-credit"][0]["name"]
+    )
+    try:
+        outstr += (
+            j["releases"][0]["artist-credit"][0]["joinphrase"]
+            + " "
+            + j["releases"][0]["artist-credit"][1]["name"]
+        )
     except KeyError as e:
         pass
     except IndexError as e:
         pass
-    try: 
-        outstr += j["releases"][0]["artist-credit"][1]["joinphrase"] + " " + j["releases"][0]["artist-credit"][2]["name"]
+    try:
+        outstr += (
+            j["releases"][0]["artist-credit"][1]["joinphrase"]
+            + " "
+            + j["releases"][0]["artist-credit"][2]["name"]
+        )
     except KeyError as e:
         pass
     except IndexError as e:
         pass
     return outstr
 
+
 lastcat = ""
 lastjson = ""
+
+
 def mb_request(catnum, request_type):
     """Requests MusicBrainz for album with catalog number."""
     global lastcat
     global lastjson
     if lastcat != catnum:
         lastcat = catnum
-        lastjson = requests.get("https://musicbrainz.org/ws/2/release?query={}:\"{}\"&limit=1&fmt=json".format(request_type, catnum)).text
+        lastjson = requests.get(
+            'https://musicbrainz.org/ws/2/release?query={}:"{}"&limit=1&fmt=json'.format(
+                request_type, catnum
+            )
+        ).text
     return lastjson
 
-class ResidualDenseBlock(nn.Module):
-    def __init__(self, in_channels, growth_channels=32, scale=0.2):
-        super(ResidualDenseBlock, self).__init__()
-        self.scale = scale
-        self.conv1 = nn.Conv2d(in_channels, growth_channels, kernel_size=3, padding=1)
-        self.relu1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(growth_channels, growth_channels, kernel_size=3, padding=1)
-        self.relu2 = nn.ReLU()
-        self.conv3 = nn.Conv2d(growth_channels, growth_channels, kernel_size=3, padding=1)
-        self.relu3 = nn.ReLU()
-        self.conv4 = nn.Conv2d(growth_channels, in_channels, kernel_size=3, padding=1)
 
-    def forward(self, x):
-        out1 = self.relu1(self.conv1(x))
-        out2 = self.relu2(self.conv2(out1))
-        out3 = self.relu3(self.conv3(out2))
-        return x + self.scale * self.conv4(out3)
+def upscale_image(image, model_path="weights/8x_NMKD-Typescale_175k.pth"):
+    # """Upscales an image"""
+    # # load a model from disk
+    # model = ModelLoader().load_from_file(model_path)
+    # assert isinstance(
+    #     model, ImageModelDescriptor
+    # ), "Loaded model is not an image-to-image model."
 
-# RRDB (Residual in Residual Dense Block)
-class RRDB(nn.Module):
-    def __init__(self, in_channels, growth_channels=32):
-        super(RRDB, self).__init__()
-        self.blocks = nn.Sequential(
-            ResidualDenseBlock(in_channels, growth_channels),
-            ResidualDenseBlock(in_channels, growth_channels),
-            ResidualDenseBlock(in_channels, growth_channels),
-        )
+    # # Prepare the model for inference
+    # model = model.cuda().eval()  # Move model to GPU (if available) and set to eval mode
 
-    def forward(self, x):
-        return x + self.blocks(x)
+    # # Convert OpenCV image (BGR) to PyTorch tensor (CHW, normalized)
+    # image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # image_tensor = (
+    #     torch.from_numpy(image_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    # )
+    # image_tensor = image_tensor.cuda()  # Move to GPU
 
-# Generator
-class ESRGANGenerator(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3, num_rrdb=23, growth_channels=32):
-        super(ESRGANGenerator, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, growth_channels, kernel_size=3, padding=1)
-        self.rrdb_blocks = nn.Sequential(*[RRDB(growth_channels) for _ in range(num_rrdb)])
-        self.conv2 = nn.Conv2d(growth_channels, growth_channels, kernel_size=3, padding=1)
-        self.upsample = nn.Sequential(
-            nn.Conv2d(growth_channels, growth_channels * 4, kernel_size=3, padding=1),
-            nn.PixelShuffle(2),
-            nn.Conv2d(growth_channels, growth_channels * 4, kernel_size=3, padding=1),
-            nn.PixelShuffle(2),
-        )
-        self.conv3 = nn.Conv2d(growth_channels, out_channels, kernel_size=3, padding=1)
+    # # Process the image with the model
+    # with torch.no_grad():
+    #     output_tensor = model(image_tensor)
 
-    def forward(self, x):
-        x1 = self.conv1(x)
-        x2 = self.rrdb_blocks(x1)
-        x3 = self.conv2(x2)
-        x = x1 + x3
-        x = self.upsample(x)
-        return self.conv3(x)
+    # # Convert output tensor back to OpenCV image format (HWC, 0-255 range, BGR)
+    # output_image = (
+    #     output_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255.0
+    # ).astype("uint8")
+    # output_image_bgr = cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR)
+
+    # cv2.imwrite(f"cropped_images/upscaled.jpg", output_image)
+
+    # return output_image_bgr
+    return image
 
 
-def upscale_image(image, model_path='weights/8x_NMKD-Typescale_175k.pth'):
-    """
-    Upscales an image using an ESRGAN model.
+def decode_barcode(image):
+    """Detect and decode barcodes from the image."""
 
-    Parameters:
-        image (numpy.ndarray): Input image in OpenCV format (BGR).
-        model_path (str): Path to the ESRGAN model file (.pth).
-
-    Returns:
-        numpy.ndarray: Upscaled image in OpenCV format (BGR).
-    """
-    # Check CUDA availability
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Load the ESRGAN model architecture
-    model = ESRGANGenerator().to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device, pickle_module=pickle))
-    model.eval()
-
-    # Convert the OpenCV image to a tensor (normalize to [0, 1])
-    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    img_tensor = ToTensor()(img_rgb).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        # Pass the image through the model
-        output_tensor = model(img_tensor)
-    
-    # Convert the output tensor back to an image
-    output_image = output_tensor.squeeze(0).cpu().clamp(0, 1)
-    output_image = ToPILImage()(output_image)
-    
-    # Convert the PIL image back to OpenCV format
-    output_image = np.array(output_image)
-    output_image = cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR)
-    
-    return output_image
-
-
-def scan_barcode(image):
-    """Scans the image for barcodes."""
-    # Convert the image to grayscale (ZBar works better with grayscale images)
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # # Get the dimensions of the image
-    # height, width = gray_image.shape
-    
-    # # Define the size of the corner regions (1/4th of width and height)
-    # corner_height, corner_width = height // 4, width // 4
-
-    # # Define corner regions: top-left, top-right, bottom-left, bottom-right
-    # corners = {
-    #     "top_left": gray_image[:corner_height, :corner_width],
-    #     "top_right": gray_image[:corner_height, -corner_width:],
-    #     "bottom_left": gray_image[-corner_height:, :corner_width],
-    #     "bottom_right": gray_image[-corner_height:, -corner_width:]
-    # }
-    
-    # # Check each corner for barcodes
-    # for corner_name, corner_image in corners.items():
-    #     barcodes = decode(corner_image)
-    #     if barcodes:
-    #         # If a barcode is found, return its data
-    #         return barcodes[0].data.decode('utf-8')
-    
-    # Use pyzbar to decode the barcode(s) in the image
-    barcodes = decode(gray_image)
-    
-    if barcodes:
-        # Return the first decoded barcode's data as a string
-        return barcodes[0].data.decode('utf-8')
-    else:
-        # Return None if no barcode is detected
+    barcode_images = detect_barcode(image)
+    if not barcode_images:
         return None
-    
-    # Return None if no barcode is detected in any corner
+    upscaled_barcode = upscale_image(barcode_images[0])
+    barcodes = decode(upscaled_barcode)
+    for barcode in barcodes:
+        barcode_data = barcode.data.decode("utf-8")  # Convert to string
+        barcode_type = barcode.type  # E.g., CODE128, EAN13, etc.
+        print(f"Detected barcode: {barcode_data} (Type: {barcode_type})")
+        print(barcode.rect)
+        return barcode_data  # Return the first barcode found
+    return None  # No barcode detected
+
+
+def detect_barcode(
+    image, model_path="weights/yolo8n-barcode.onnx", confidence_thres=0.5, iou_thres=0.5
+):
+    # Load the ONNX model
+    session, ndtype, input_height, input_width = build_model(model_path)
+
+    # Preprocess the input image
+    img_height, img_width = image.shape[:2]
+    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    img_resized = cv2.resize(img_rgb, (input_width, input_height))
+    img_normalized = img_resized / 255.0
+    img_transposed = np.transpose(img_normalized, (2, 0, 1))
+    img_data = np.expand_dims(img_transposed, axis=0).astype(np.float32)
+
+    # Perform inference
+    outputs = session.run(None, {session.get_inputs()[0].name: img_data})
+    detections = np.transpose(np.squeeze(outputs[0]))
+
+    # Post-process the detections
+    x_factor = img_width / input_width
+    y_factor = img_height / input_height
+    boxes, scores, class_ids = [], [], []
+
+    for detection in detections:
+        class_scores = detection[4:]
+        max_score = np.amax(class_scores)
+        if max_score >= confidence_thres:
+            class_id = np.argmax(class_scores)
+            x, y, w, h = detection[:4]
+            left = int((x - w / 2) * x_factor)
+            top = int((y - h / 2) * y_factor)
+            width = int(w * x_factor)
+            height = int(h * y_factor)
+            boxes.append([left, top, width, height])
+            scores.append(max_score)
+            class_ids.append(class_id)
+
+    indices = cv2.dnn.NMSBoxes(boxes, scores, confidence_thres, iou_thres)
+    cropped_images = []
+
+    if indices is not None:
+        for i in indices.flatten():
+            left, top, width, height = boxes[i]
+            cropped_image = image[
+                max(0, top) : min(img_height, top + height),
+                max(0, left) : min(img_width, left + width),
+            ]
+            cropped_images.append(cropped_image)
+
+        for idx, cropped_image in enumerate(cropped_images):
+            cv2.imwrite(f"cropped_images/object_{idx}.jpg", cropped_image)
+
+        return cropped_images
     return None
+
 
 def extract_text_with_paddleocr(image):
     """Takes an OpenCV image, runs PaddleOCR, and returns the extracted text strings."""
@@ -334,19 +373,29 @@ def extract_text_with_paddleocr(image):
 
     return text_strings
 
-def scan_cropped_masked_image(im, segments, boxes, back_threshold=0.9, side_threshold=0.7, output_dir='cropped_images'):
+
+def scan_cropped_masked_image(
+    im,
+    segments,
+    boxes,
+    back_threshold=0.9,
+    side_threshold=0.7,
+    output_dir="cropped_images",
+):
     """Crops the image to the mask and scans it if confidence is greater than the threshold."""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     for i, (mask, box) in enumerate(zip(segments, boxes)):
         conf = box[4]  # Confidence is the 5th element in the box array
-        object_name = classes[int(box[5])] 
+        object_name = classes[int(box[5])]
         # Create a binary mask for the current object
         binary_mask = mask.astype(np.uint8) * 255  # Convert mask to binary (0 or 255)
 
         # Ensure the mask is the same size as the original image
-        mask_resized = cv2.resize(binary_mask, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
+        mask_resized = cv2.resize(
+            binary_mask, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_LINEAR
+        )
 
         # Apply the mask to the original image
         masked_image = cv2.bitwise_and(im, im, mask=mask_resized)
@@ -356,32 +405,60 @@ def scan_cropped_masked_image(im, segments, boxes, back_threshold=0.9, side_thre
         cropped_image = masked_image[y1:y2, x1:x2]
 
         # Save the cropped image
-        output_path = os.path.join(output_dir, f'cropped_mask_{object_name}.png')
+        output_path = os.path.join(output_dir, f"cropped_mask_{object_name}.png")
         cv2.imwrite(output_path, cropped_image)
-        print(f'Saved cropped image: {output_path}')
+        print(f"Saved cropped image: {output_path}")
         if conf > side_threshold and object_name == "Side":
             try:
+                print("1")
                 ocr_list = extract_text_with_paddleocr(cropped_image)
             except TypeError as e:
-                return ""
-            sorted_list = sorted(ocr_list, key=lambda s: sum(c.isdigit() for c in s) / len(s) if len(s) > 0 else 0)
+                print("2")
+                upscaled_image = upscale_image(cropped_image)
+                try:
+                    print("3")
+                    ocr_list = extract_text_with_paddleocr(upscaled_image)
+                except TypeError as e:
+                    print("4")
+                    return "Side"
+            print("5")
+            sorted_list = sorted(
+                ocr_list,
+                key=lambda s: sum(c.isdigit() for c in s) / len(s) if len(s) > 0 else 0,
+            )
+            print("6")
             catnum = sorted_list[-1]
+            print("7")
             if any(char.isdigit() for char in catnum):
+                print(f"Catalog Number: {catnum}")
                 jsonstr = mb_request(catnum, "catno")
                 try:
+                    print("8")
                     return get_full_album_name(jsonstr)
                 except IndexError as e:
                     return catnum
             else:
+                print("Catalog Number not found")
                 return catnum
 
         if conf > back_threshold and object_name == "Back":
-            print(scan_barcode(cropped_image))
+            # Add barcode scanning here
+            barcodenum = decode_barcode(cropped_image)
+            if barcodenum:
+                print(f"Barcode: {barcodenum}")
+                jsonstr = mb_request(barcodenum, "barcode")
+                try:
+                    return get_full_album_name(jsonstr)
+                except IndexError as e:
+                    return barcodenum
+            else:
+                print("Barcode not found")
+            return "Back"
 
         if conf > back_threshold and object_name == "Front":
-            print(scan_barcode(cropped_image))
-        print(scan_barcode(cropped_image))
+            return "Front"
         return ""
+
 
 if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
@@ -417,18 +494,27 @@ if __name__ == "__main__":
             img = cv2.resize(img, scaled_size, interpolation=cv2.INTER_AREA)
 
         # Preprocess the image
-        img_processed, ratio, (pad_w, pad_h) = preprocess(img, model_height, model_width, ndtype)
+        img_processed, ratio, (pad_w, pad_h) = preprocess(
+            img, model_height, model_width, ndtype
+        )
 
         # Inference
         preds = session.run(None, {session.get_inputs()[0].name: img_processed})
-        boxes, segments, _ = postprocess(preds, img, ratio, pad_w, pad_h, conf_threshold=args.conf, iou_threshold=args.iou)
-        
+        boxes, segments, _ = postprocess(
+            preds,
+            img,
+            ratio,
+            pad_w,
+            pad_h,
+            conf_threshold=args.conf,
+            iou_threshold=args.iou,
+        )
+
         # Save cropped masked images if confidence is greater than 90%
-        upscaled_img = upscale_image(img)
-        name = scan_cropped_masked_image(upscaled_img, segments, boxes)
+        name = scan_cropped_masked_image(img, segments, boxes)
 
         # Draw and visualize results
-        draw_and_visualize(upscaled_img, boxes, segments, name)
+        draw_and_visualize(img, boxes, segments, name)
 
         # Break the loop on key press
         if cv2.waitKey(1) & 0xFF == ord("1"):
